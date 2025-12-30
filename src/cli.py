@@ -25,6 +25,7 @@ def cli():
               help="출력 디렉토리 (기본: PDF와 같은 위치)")
 @click.option("--midi/--no-midi", default=True, help="MIDI 파일 생성")
 @click.option("--audio/--no-audio", default=True, help="오디오 파일 생성")
+@click.option("--pdf/--no-pdf", "export_pdf", default=True, help="성부별 PDF 생성")
 @click.option("--format", "audio_format", type=click.Choice(["wav", "mp3"]),
               default="wav", help="오디오 형식")
 @click.option("--dpi", default=200, help="PDF 변환 해상도 (기본: 200)")
@@ -34,18 +35,20 @@ def convert(
     output_dir: Optional[str],
     midi: bool,
     audio: bool,
+    export_pdf: bool,
     audio_format: str,
     dpi: int,
     tempo: Optional[int]
 ):
-    """PDF 악보를 성부별 MIDI/오디오로 변환
+    """PDF 악보를 성부별 MIDI/오디오/PDF로 변환
 
-    전체 파이프라인: PDF → 이미지 → OMR → MusicXML → 성부 분리 → MIDI → 오디오
+    전체 파이프라인: PDF → 이미지 → OMR → MusicXML → 성부 분리 → MIDI/오디오/PDF
     """
     from src.omr import recognize_score
     from src.converter import parse_musicxml, export_parts_midi
     from src.converter.part_splitter import split_satb
     from src.audio import render_parts_audio
+    from src.pdf import export_parts_pdf
 
     pdf_path = Path(pdf_path)
 
@@ -64,7 +67,7 @@ def convert(
     click.echo(f"{'='*60}\n")
 
     # 1단계: PDF → MusicXML (OMR)
-    click.echo("[1/4] PDF 악보 인식 (OMR)...")
+    click.echo("[1/5] PDF 악보 인식 (OMR)...")
     try:
         musicxml_paths = recognize_score(pdf_path, output_dir, dpi=dpi)
         click.echo(f"      ✓ {len(musicxml_paths)}개 페이지 인식 완료\n")
@@ -77,7 +80,7 @@ def convert(
         return
 
     # 2단계: 성부 분리
-    click.echo("[2/4] 성부 분리 (SATB)...")
+    click.echo("[2/5] 성부 분리 (SATB)...")
     parts_dir = output_dir / "parts"
     all_parts = {}
 
@@ -93,7 +96,7 @@ def convert(
 
     # 3단계: MIDI 생성
     if midi:
-        click.echo("[3/4] MIDI 생성...")
+        click.echo("[3/5] MIDI 생성...")
         midi_dir = output_dir / "midi"
         try:
             midi_results = export_parts_midi(parts_dir, midi_dir, tempo_bpm=tempo)
@@ -102,12 +105,12 @@ def convert(
             click.echo(f"      ✗ MIDI 생성 실패: {e}", err=True)
             midi_results = {}
     else:
-        click.echo("[3/4] MIDI 생성 건너뜀\n")
+        click.echo("[3/5] MIDI 생성 건너뜀\n")
         midi_results = {}
 
     # 4단계: 오디오 렌더링
     if audio and midi_results:
-        click.echo(f"[4/4] 오디오 렌더링 ({audio_format.upper()})...")
+        click.echo(f"[4/5] 오디오 렌더링 ({audio_format.upper()})...")
         audio_dir = output_dir / "audio"
         try:
             audio_results = render_parts_audio(midi_dir, audio_dir, format=audio_format)
@@ -116,8 +119,22 @@ def convert(
             click.echo(f"      ✗ 오디오 생성 실패: {e}", err=True)
             audio_results = {}
     else:
-        click.echo("[4/4] 오디오 렌더링 건너뜀\n")
+        click.echo("[4/5] 오디오 렌더링 건너뜀\n")
         audio_results = {}
+
+    # 5단계: 성부별 PDF 생성
+    if export_pdf:
+        click.echo("[5/5] 성부별 PDF 생성...")
+        pdf_output_dir = output_dir / "pdf"
+        try:
+            pdf_results = export_parts_pdf(parts_dir, pdf_output_dir)
+            click.echo(f"      ✓ {len(pdf_results)}개 PDF 생성 완료\n")
+        except Exception as e:
+            click.echo(f"      ✗ PDF 생성 실패: {e}", err=True)
+            pdf_results = {}
+    else:
+        click.echo("[5/5] PDF 생성 건너뜀\n")
+        pdf_results = {}
 
     # 결과 요약
     click.echo(f"{'='*60}")
@@ -129,6 +146,8 @@ def convert(
         click.echo(f"  - midi/     : {len(midi_results)}개 MIDI")
     if audio_results:
         click.echo(f"  - audio/    : {len(audio_results)}개 {audio_format.upper()}")
+    if pdf_results:
+        click.echo(f"  - pdf/      : {len(pdf_results)}개 PDF")
     click.echo(f"{'='*60}\n")
 
 
@@ -226,6 +245,42 @@ def render(input_path: str, output_dir: Optional[str], audio_format: str):
 
         click.echo(f"\n오디오 렌더링 중: {input_path.name}\n")
         midi_to_audio(input_path, output_path)
+        click.echo(f"\n✓ 저장됨: {output_path}")
+
+
+@cli.command()
+@click.argument("input_path", type=click.Path(exists=True))
+@click.option("-o", "--output", "output_dir", type=click.Path(),
+              help="출력 디렉토리")
+def export_pdf(input_path: str, output_dir: Optional[str]):
+    """MusicXML 파일을 PDF로 변환
+
+    단일 MusicXML 파일 또는 디렉토리 내 모든 MusicXML 파일을 PDF로 변환합니다.
+    """
+    from src.pdf import musicxml_to_pdf, export_parts_pdf
+
+    input_path = Path(input_path)
+
+    if input_path.is_dir():
+        if output_dir is None:
+            output_dir = input_path.parent / "pdf"
+        else:
+            output_dir = Path(output_dir)
+
+        click.echo(f"\nPDF 생성 중: {input_path}\n")
+        results = export_parts_pdf(input_path, output_dir)
+        click.echo(f"\n✓ {len(results)}개 PDF 생성 완료")
+        click.echo(f"  출력: {output_dir}")
+    else:
+        if output_dir is None:
+            output_path = input_path.with_suffix(".pdf")
+        else:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{input_path.stem}.pdf"
+
+        click.echo(f"\nPDF 생성 중: {input_path.name}\n")
+        musicxml_to_pdf(input_path, output_path)
         click.echo(f"\n✓ 저장됨: {output_path}")
 
 
