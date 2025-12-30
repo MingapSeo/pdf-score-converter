@@ -1,0 +1,18 @@
+# PDF Score Converter Dependencies
+
+# 음악 처리
+music21>=9.1.0          # MusicXML 파싱 및 음악 데이터 처리
+mido>=1.3.0             # MIDI 파일 생성/편집
+
+# 오디오 생성
+midi2audio>=0.1.1       # MIDI to Audio 변환 (FluidSynth wrapper)
+
+# PDF 처리
+pdf2image>=1.16.0       # PDF를 이미지로 변환
+PyPDF2>=3.0.0           # PDF 조작 및 분할
+
+# CLI
+click>=8.1.0            # CLI 프레임워크
+
+# 유틸리티
+Pillow>=10.0.0          # 이미지 처리 (pdf2image 의존)
