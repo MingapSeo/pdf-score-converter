@@ -247,12 +247,95 @@ def split_parts(
     return results
 
 
+def split_combined_voices(
+    part: stream.Part,
+    split_pitch: int = 60
+) -> Tuple[stream.Part, stream.Part]:
+    """
+    화음이 있는 파트를 음역대로 분리 (SA 또는 TB 분리용)
+
+    Args:
+        part: 분리할 파트
+        split_pitch: 분리 기준 MIDI pitch (기본: C4=60)
+
+    Returns:
+        (상단 파트, 하단 파트) 튜플
+    """
+    upper_part = stream.Part()
+    lower_part = stream.Part()
+
+    # flatten()으로 모든 음표를 단순 리스트로 추출
+    all_notes = list(part.flatten().notesAndRests)
+
+    upper_notes = []
+    lower_notes = []
+
+    for elem in all_notes:
+        if isinstance(elem, chord.Chord):
+            # 화음: 상단/하단 분리
+            high_notes = [n for n in elem.notes if n.pitch.midi >= split_pitch]
+            low_notes = [n for n in elem.notes if n.pitch.midi < split_pitch]
+
+            if high_notes:
+                if len(high_notes) == 1:
+                    new_note = note.Note(high_notes[0].pitch)
+                    new_note.duration = elem.duration
+                    new_note.offset = elem.offset
+                    upper_notes.append(new_note)
+                else:
+                    new_chord = chord.Chord([n.pitch for n in high_notes])
+                    new_chord.duration = elem.duration
+                    new_chord.offset = elem.offset
+                    upper_notes.append(new_chord)
+
+            if low_notes:
+                if len(low_notes) == 1:
+                    new_note = note.Note(low_notes[0].pitch)
+                    new_note.duration = elem.duration
+                    new_note.offset = elem.offset
+                    lower_notes.append(new_note)
+                else:
+                    new_chord = chord.Chord([n.pitch for n in low_notes])
+                    new_chord.duration = elem.duration
+                    new_chord.offset = elem.offset
+                    lower_notes.append(new_chord)
+
+        elif isinstance(elem, note.Note):
+            new_note = note.Note(elem.pitch)
+            new_note.duration = elem.duration
+            new_note.offset = elem.offset
+            if elem.pitch.midi >= split_pitch:
+                upper_notes.append(new_note)
+            else:
+                lower_notes.append(new_note)
+
+        elif isinstance(elem, note.Rest):
+            # 쉼표는 양쪽에
+            r1 = note.Rest(duration=elem.duration)
+            r1.offset = elem.offset
+            r2 = note.Rest(duration=elem.duration)
+            r2.offset = elem.offset
+            upper_notes.append(r1)
+            lower_notes.append(r2)
+
+    # 파트에 음표 추가
+    for n in upper_notes:
+        upper_part.insert(n.offset, n)
+
+    for n in lower_notes:
+        lower_part.insert(n.offset, n)
+
+    return upper_part, lower_part
+
+
 def split_satb(
     score: stream.Score,
     output_dir: str | Path
 ) -> Dict[str, Path]:
     """
     4부 합창 악보(SATB)를 각 성부로 분리
+
+    Audiveris 등 OMR 출력에서 SA, TB가 합쳐진 경우도 처리
 
     Args:
         score: music21 Score 객체
@@ -283,7 +366,6 @@ def split_satb(
 
     elif len(parts) == 2:
         # 2개 파트: 대보표 2개 (SA + TB)
-        # 각 대보표를 상단/하단으로 분리
         upper1, lower1 = split_grand_staff(parts[0])
         upper2, lower2 = split_grand_staff(parts[1])
 
@@ -299,15 +381,152 @@ def split_satb(
             print(f"  저장됨: {output_path.name}")
 
     else:
-        # 기타 경우: 그대로 분리
-        for i, part in enumerate(parts):
-            new_score = stream.Score()
-            new_score.append(part)
+        # Audiveris 등 복잡한 출력: 성부 자동 분류
+        # Voice 파트와 Piano 파트 분리
+        voice_parts = []
+        piano_parts = []
 
-            output_path = output_dir / f"part_{i+1}.musicxml"
-            new_score.write('musicxml', fp=str(output_path))
-            results[f"part_{i+1}"] = output_path
-            print(f"  저장됨: {output_path.name}")
+        for part in parts:
+            inst = part.getInstrument()
+            notes = list(part.flatten().notes)
+
+            if len(notes) < 50:
+                continue  # 음표가 적은 파트 무시 (인트로/아웃트로 등)
+
+            if 'Piano' in str(inst) or 'piano' in (part.partName or '').lower():
+                piano_parts.append(part)
+            else:
+                voice_parts.append(part)
+
+        # 화음 비율로 합쳐진 파트 판별
+        def get_chord_ratio(part):
+            notes = list(part.flatten().notes)
+            if not notes:
+                return 0
+            chords = [n for n in notes if isinstance(n, chord.Chord)]
+            return len(chords) / len(notes)
+
+        # 화음 비율이 높은 파트(>30%)는 합쳐진 성부로 간주
+        combined_parts = [p for p in voice_parts if get_chord_ratio(p) > 0.3]
+        melody_parts = [p for p in voice_parts if get_chord_ratio(p) <= 0.3]
+
+        print(f"  감지: 합쳐진 파트 {len(combined_parts)}개, 단선율 {len(melody_parts)}개")
+
+        # 합쳐진 파트가 2개인 경우: SA + TB로 분리
+        if len(combined_parts) == 2:
+            # 음역대 분석으로 SA/TB 판별
+            ranges = []
+            for vp in combined_parts:
+                pitches = [n.pitch.midi for n in vp.flatten().notes if hasattr(n, 'pitch')]
+                if pitches:
+                    ranges.append((min(pitches), max(pitches), sum(pitches)/len(pitches)))
+                else:
+                    ranges.append((0, 0, 0))
+
+            # 평균 음높이가 높은 것이 SA
+            if ranges[0][2] > ranges[1][2]:
+                sa_part, tb_part = combined_parts[0], combined_parts[1]
+            else:
+                sa_part, tb_part = combined_parts[1], combined_parts[0]
+
+            # 각 파트의 중간값을 기준으로 분리
+            def get_median_pitch(part):
+                pitches = []
+                for n in part.flatten().notes:
+                    if isinstance(n, chord.Chord):
+                        for p in n.pitches:
+                            pitches.append(p.midi)
+                    elif hasattr(n, 'pitch'):
+                        pitches.append(n.pitch.midi)
+                if pitches:
+                    pitches.sort()
+                    return pitches[len(pitches) // 2]
+                return 60
+
+            # SA 분리 (중간값 기준)
+            sa_median = get_median_pitch(sa_part)
+            print(f"  SA 분리 기준: MIDI {sa_median}")
+            soprano, alto = split_combined_voices(sa_part, split_pitch=sa_median)
+            soprano.partName = "Soprano"
+            alto.partName = "Alto"
+
+            # TB 분리 (중간값 기준)
+            tb_median = get_median_pitch(tb_part)
+            print(f"  TB 분리 기준: MIDI {tb_median}")
+            tenor, bass = split_combined_voices(tb_part, split_pitch=tb_median)
+            tenor.partName = "Tenor"
+            bass.partName = "Bass"
+
+            # SATB 저장
+            for part, name in [(soprano, "soprano"), (alto, "alto"),
+                               (tenor, "tenor"), (bass, "bass")]:
+                # 악기 설정
+                inst = instrument.Instrument()
+                inst.midiProgram = 52  # Choir Aahs
+                part.insert(0, inst)
+
+                new_score = stream.Score()
+                new_score.append(part)
+
+                output_path = output_dir / f"{name}.musicxml"
+                new_score.write('musicxml', fp=str(output_path))
+                results[name] = output_path
+                print(f"  저장됨: {output_path.name}")
+
+        elif len(voice_parts) >= 3:
+            # 3개 이상: 음역대로 SATB 추정
+            # 음역별 정렬
+            parts_with_range = []
+            for vp in voice_parts:
+                pitches = [n.pitch.midi for n in vp.flatten().notes if hasattr(n, 'pitch')]
+                if pitches:
+                    avg_pitch = sum(pitches) / len(pitches)
+                    parts_with_range.append((avg_pitch, vp))
+
+            parts_with_range.sort(key=lambda x: x[0], reverse=True)  # 높은 음역 먼저
+
+            voice_names = ["soprano", "alto", "tenor", "bass"]
+            for i, (_, part) in enumerate(parts_with_range[:4]):
+                name = voice_names[i] if i < 4 else f"voice_{i+1}"
+
+                inst = instrument.Instrument()
+                inst.midiProgram = 52
+                part.insert(0, inst)
+                part.partName = name.capitalize()
+
+                new_score = stream.Score()
+                new_score.append(part)
+
+                output_path = output_dir / f"{name}.musicxml"
+                new_score.write('musicxml', fp=str(output_path))
+                results[name] = output_path
+                print(f"  저장됨: {output_path.name}")
+
+        else:
+            # 그 외: 그대로 저장
+            for i, part in enumerate(voice_parts):
+                new_score = stream.Score()
+                new_score.append(part)
+
+                output_path = output_dir / f"voice_{i+1}.musicxml"
+                new_score.write('musicxml', fp=str(output_path))
+                results[f"voice_{i+1}"] = output_path
+                print(f"  저장됨: {output_path.name}")
+
+        # 피아노 파트 저장 (옵션)
+        if piano_parts:
+            for i, part in enumerate(piano_parts):
+                try:
+                    new_score = stream.Score()
+                    new_score.append(part)
+
+                    name = "piano" if len(piano_parts) == 1 else f"piano_{i+1}"
+                    output_path = output_dir / f"{name}.musicxml"
+                    new_score.write('musicxml', fp=str(output_path))
+                    results[name] = output_path
+                    print(f"  저장됨: {output_path.name}")
+                except Exception as e:
+                    print(f"  경고: 피아노 파트 저장 실패 - {e}")
 
     return results
 
