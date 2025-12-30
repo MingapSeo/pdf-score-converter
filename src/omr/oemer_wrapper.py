@@ -36,7 +36,7 @@ def recognize_image(
 
     # oemer CLI 실행
     cmd = [
-        sys.executable, "-m", "oemer",
+        "oemer",
         str(image_path),
         "-o", str(output_dir)
     ]
