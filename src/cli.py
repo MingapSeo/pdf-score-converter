@@ -44,7 +44,7 @@ def convert(
 
     전체 파이프라인: PDF → 이미지 → OMR → MusicXML → 성부 분리 → MIDI/오디오/PDF
     """
-    from src.omr import recognize_score
+    from src.omr import recognize_score, OMR_ENGINE
     from src.converter import parse_musicxml, export_parts_midi
     from src.converter.part_splitter import split_satb
     from src.audio import render_parts_audio
@@ -67,7 +67,7 @@ def convert(
     click.echo(f"{'='*60}\n")
 
     # 1단계: PDF → MusicXML (OMR)
-    click.echo("[1/5] PDF 악보 인식 (OMR)...")
+    click.echo(f"[1/5] PDF 악보 인식 (OMR: {OMR_ENGINE})...")
     try:
         musicxml_paths = recognize_score(pdf_path, output_dir, dpi=dpi)
         click.echo(f"      ✓ {len(musicxml_paths)}개 페이지 인식 완료\n")
