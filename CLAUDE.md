@@ -9,17 +9,17 @@ PDF 합창 악보를 각 성부(SATB)별로 분리하고 MIDI/음원으로 변�
 ## 기술 스택
 
 - **언어**: Python 3.11+
-- **OMR 엔진**: Audiveris (Java 기반, CLI 호출)
+- **OMR 엔진**: oemer (Python 딥러닝 기반 OMR)
 - **음악 처리**: music21, mido
 - **음원 생성**: FluidSynth + SoundFont (합창 음색)
 - **PDF 처리**: pdf2image, PyPDF2
-- **인터페이스**: CLI (argparse/click)
+- **인터페이스**: CLI (click)
 
 ## 워크플로우
 
 ```
 ┌─────────┐    ┌───────────┐    ┌──────────┐    ┌─────────────┐    ┌──────────┐
-│  PDF    │ -> │ Audiveris │ -> │ MusicXML │ -> │ 성부 분리    │ -> │ 출력     │
+│  PDF    │ -> │  oemer    │ -> │ MusicXML │ -> │ 성부 분리    │ -> │ 출력     │
 │  악보   │    │  (OMR)    │    │          │    │ (music21)   │    │          │
 └─────────┘    └───────────┘    └──────────┘    └─────────────┘    └──────────┘
                                                                         │
@@ -50,7 +50,7 @@ pdf-score-converter/
 │   ├── cli.py              # CLI 진입점
 │   ├── omr/
 │   │   ├── __init__.py
-│   │   └── audiveris.py    # Audiveris 연동
+│   │   └── oemer_wrapper.py # oemer OMR 연동
 │   ├── converter/
 │   │   ├── __init__.py
 │   │   ├── musicxml.py     # MusicXML 파싱
@@ -91,6 +91,7 @@ python -m src.cli analyze score.pdf
 ## 의존성
 
 ### Python 패키지
+- oemer: 딥러닝 기반 OMR (악보 인식)
 - music21: MusicXML 파싱 및 음악 데이터 처리
 - mido: MIDI 파일 생성
 - midi2audio: MIDI를 오디오로 변환
@@ -98,18 +99,16 @@ python -m src.cli analyze score.pdf
 - PyPDF2: PDF 조작
 - click: CLI 프레임워크
 
-### 외부 도구 (별도 설치 필요)
-- Java 17+: Audiveris 실행에 필요
-- Audiveris: OMR 엔진
-- FluidSynth: MIDI 음원 합성
-- Poppler: PDF 렌더링 (pdf2image 의존)
+### 외부 도구 (Homebrew로 설치)
+- FluidSynth: MIDI 음원 합성 (`brew install fluid-synth`)
+- Poppler: PDF 렌더링 (`brew install poppler`)
 
 ## 개발 현황
 
 - [x] 요구사항 정의
 - [x] 기술 스택 결정
-- [ ] 프로젝트 구조 생성
-- [ ] 환경 설정 (Audiveris, FluidSynth 설치)
+- [x] 프로젝트 구조 생성
+- [x] 환경 설정 (oemer, FluidSynth, Poppler 설치)
 - [ ] OMR 파이프라인 구현
 - [ ] MusicXML 파싱 및 성부 분리 구현
 - [ ] MIDI 변환 구현
@@ -134,11 +133,14 @@ source venv/bin/activate  # macOS/Linux
 # 의존성 설치
 pip install -r requirements.txt
 
+# 외부 도구 설치 (macOS)
+brew install fluid-synth poppler
+
 # 테스트 실행
 pytest tests/
 
-# Audiveris 설치 확인
-audiveris -help
+# oemer 설치 확인
+python -c "import oemer; print('oemer OK')"
 ```
 
 ## SoundFont 정보
@@ -149,7 +151,7 @@ audiveris -help
 
 ## 참고 자료
 
-- [Audiveris GitHub](https://github.com/Audiveris/audiveris)
+- [oemer GitHub](https://github.com/BreezeWhite/oemer) - Python 딥러닝 OMR
 - [music21 Documentation](https://web.mit.edu/music21/doc/)
 - [FluidSynth](https://www.fluidsynth.org/)
 - [MIDI Instrument List](https://en.wikipedia.org/wiki/General_MIDI#Program_change_events)
