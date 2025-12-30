@@ -73,19 +73,35 @@ pdf-score-converter/
 ## CLI 사용법
 
 ```bash
-# 기본 사용법: PDF를 모든 형식으로 변환
-python -m src.cli convert "내 발을 씻기신 예수.pdf"
+# 패키지 설치 (editable mode)
+pip install -e .
 
-# 특정 출력 형식만 선택
-python -m src.cli convert score.pdf --output midi
-python -m src.cli convert score.pdf --output mp3
-python -m src.cli convert score.pdf --output pdf
+# 기본 사용법: PDF를 MIDI/오디오로 변환
+score-converter convert "내 발을 씻기신 예수.pdf"
 
-# 특정 성부만 추출
-python -m src.cli convert score.pdf --parts soprano,alto
+# 출력 디렉토리 지정
+score-converter convert score.pdf -o ./output
+
+# MIDI만 생성 (오디오 생략)
+score-converter convert score.pdf --no-audio
+
+# MP3 형식으로 출력
+score-converter convert score.pdf --format mp3
+
+# DPI 조정 (OMR 정확도 향상)
+score-converter convert score.pdf --dpi 300
+
+# 템포 변경
+score-converter convert score.pdf --tempo 80
 
 # 악보 구조 미리보기 (OMR 결과 확인)
-python -m src.cli analyze score.pdf
+score-converter analyze score.pdf
+
+# MusicXML 파일 성부 분리
+score-converter split score.musicxml -o ./parts
+
+# MIDI를 오디오로 변환
+score-converter render ./midi -o ./audio --format wav
 ```
 
 ## 의존성
@@ -109,13 +125,13 @@ python -m src.cli analyze score.pdf
 - [x] 기술 스택 결정
 - [x] 프로젝트 구조 생성
 - [x] 환경 설정 (oemer, FluidSynth, Poppler 설치)
-- [ ] OMR 파이프라인 구현
-- [ ] MusicXML 파싱 및 성부 분리 구현
-- [ ] MIDI 변환 구현
-- [ ] 음원 생성 구현 (합창 음색)
-- [ ] 성부별 PDF 생성 구현
-- [ ] CLI 완성
-- [ ] 테스트
+- [x] OMR 파이프라인 구현 (PDF → 이미지 → oemer → MusicXML)
+- [x] MusicXML 파싱 및 성부 분리 구현 (SATB 자동 분류)
+- [x] MIDI 변환 구현 (합창 음색: Choir Aahs)
+- [x] 음원 생성 구현 (FluidSynth WAV/MP3)
+- [ ] 성부별 PDF 생성 구현 (미구현)
+- [x] CLI 완성 (click 기반)
+- [x] 통합 테스트
 
 ## 알려진 제한사항
 
